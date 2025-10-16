@@ -34,14 +34,29 @@ classdef ARobotarium < handle
     end
     
     properties (GetAccess = protected, SetAccess = protected)
-        
-        
+        % The (v, w) velocity of each robot 
         velocities
+        % The (x, y, theta) pose of each robot
         poses
-        left_leds
-        right_leds                
-        % Figure handle for simulator
+        % The distance sensor measurements for each robot
+        distances
+        % The (x, y, z) acceleration of each robot (m/s^2)
+        accelerations
+        % The (x, y, z) orientation of each robot (degrees)
+        orientations
+        % The (x, y, z) magnitometer measurements of each robot
+        magnetic_fields
+        % The initial encoder counts
+        initial_encoders
+        % The left and right encoder counts of each robot
+        encoders
+        % Are the distance sensors enabled
+        distance_sensors_enabled
+
+        % The led connected to the robot
+        leds
         
+        % Figure handle for simulator
         show_figure
     end   
     
@@ -65,11 +80,16 @@ classdef ARobotarium < handle
             this.number_of_robots = number_of_robots;
             N = number_of_robots;            
             
-            this.poses = zeros(3, N);
-            this.show_figure = show_figure;
             this.velocities = zeros(2, N);
-            this.left_leds = zeros(3, N);
-            this.right_leds = zeros(3, N);    
+            this.poses = zeros(3, N);
+            this.distances = zeros(7, N);
+            this.accelerations = zeros(3, N);
+            this.orientations = zeros(3, N);
+            this.magnetic_fields = zeros(3, N);
+            this.initial_encoders = zeros(2, N);
+            this.encoders = zeros(2, N);
+            this.show_figure = show_figure;
+            this.leds = zeros(3, N);
             
             if(show_figure)  
                 if(isempty(figure_handle))
@@ -80,6 +100,9 @@ classdef ARobotarium < handle
                 
                 this.initialize_visualization();
             end                                                  
+        end
+
+        function call_at_scripts_end(~)
         end
         
         function agents = get_number_of_robots(this)
@@ -94,29 +117,46 @@ classdef ARobotarium < handle
             
             this.velocities(:, ids) = vs;
         end
-        
-        function this = set_left_leds(this, ids, rgbs)
+
+        function this = set_leds(this, ids, rgbs)
             N = size(rgbs, 2);
-            
-            assert(N<=this.number_of_robots, 'Row size of rgb values (%i) must be <= to number of agents (%i)', ...
-                N, this.number_of_robots);
-            
-            assert(all(all(rgbs(1:3, :) <= 255)) && all(all(rgbs(1:3, :) >= 0)), 'RGB commands must be between 0 and 255');
-            
-            % Only set LED commands for the selected robots
-            this.left_leds(:, ids) = rgbs;
+
+            assert(N <= this.number_of_robots, "Row size of rgb values (%i) must be <= to number of agents (%i)", ...
+                N, this.number_of_robotls);
+
+            assert(all(all(rgbs(1:3, :) <= 255)) && all(all(rgbs(1:3, :) >= 0)), "RGB commands must be between 0 and 255");
+
+            this.leds(:, ids) = rgbs;
         end
-        
-        function this = set_right_leds(this, ids, rgbs)
-            N = size(rgbs, 2);
-            
-            assert(N<=this.number_of_robots, 'Row size of rgb values (%i) must be <= to number of agents (%i)', ...
-                N, this.number_of_robots);
-            
-            assert(all(all(rgbs(1:3, :) <= 255)) && all(all(rgbs(1:3, :) >= 0)), 'RGB commands must be between 0 and 255');
-            
-            % Only set LED commands for the selected robots
-            this.right_leds(:, ids) = rgbs;
+
+        function distances = get_distances(this)
+            % Get the distance sensor readings for each of the robots
+
+            distances = this.distances;
+        end
+
+        function accelerations = get_accelerations(this)
+            % Get the acceleration readings for each of the robots
+
+            accelerations = this.accelerations;
+        end
+
+        function orientations = get_orientations(this)
+            % Get the orientation readings for each of the robots
+
+            orientations = this.orientations;
+        end
+
+        function magnetic_fields = get_magnetic_fields(this)
+            % Get the magnitude of the magnetic fields for each of the robots
+
+            magnetic_fields = this.magnetic_fields;
+        end
+
+        function encoders = get_encoders(this)
+            % Get the encoder values for each of the robots
+
+            encoders = this.encoders - this.initial_encoders;
         end
         
         function iters = time2iters(this, time)
@@ -265,11 +305,8 @@ classdef ARobotarium < handle
                 set(this.robot_handle{i}, 'Vertices', transformed(:, 1:2));
                 
                 % Set LEDs
-                left = this.left_leds/255;
-                right = this.right_leds/255;
-            
-                this.robot_handle{i}.FaceVertexCData(4, :) = left(:, i);
-                this.robot_handle{i}.FaceVertexCData(5, :) = right(:, i);
+                led_values = this.leds / 255;
+                this.robot_handle{i}.FaceVertexCData(4, :) = led_values(:, i);
             end
 
             drawnow limitrate
