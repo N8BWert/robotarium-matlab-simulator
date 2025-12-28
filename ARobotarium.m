@@ -21,6 +21,7 @@ classdef ARobotarium < handle
         collision_diameter = 0.135;
         collision_offset = 0.025;       
         boundaries = [-1.6, 1.6, -1, 1];
+        distance_sensor_error = 0.03; % 3% error. Based on the VL53L4CD datasheet
         distance_sensor_range = 0.7; % meters 
         distance_sensors_orientation = [-0.04, 0.0,  0.04, 0.05, 0.04,   0.0   -0.04;
                                          0.04, 0.06, 0.05, 0.0,  -0.05, -0.06, -0.04;

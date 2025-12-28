@@ -133,7 +133,6 @@ classdef Robotarium < ARobotarium
 
             N_sensors = size(this.distance_sensors_orientation, 2);
             this.distances = NaN(1, 7, this.number_of_robots); % 7 sensors per robot
-            % this.intersection_point = NaN(2, 7, this.number_of_robots); % One 2x1 intersection point per sensor
 
             % Find global positions and orientations of distance sensors
             R = rotation_matrix(this.poses(3,:));
@@ -170,68 +169,28 @@ classdef Robotarium < ARobotarium
                 valid_parameter = t.*parameter_on_line;
                 valid_parameter(~parameter_on_line) = this.distance_sensor_range; % Set invalid intersections to NaN
                 min_parameter = min(valid_parameter, [], 3); % Minimum t value for each sensor
-                this.distances(1, :, i) = min_parameter;
+
+                % Check if any rays intersect other robots
+                f = global_sensors(1:2,:,i) - poses(1:2, :, :); % Vectors from sensors to robot centers. 2 x N_sensors x N_robots
+                a = dot(r_all(:,:,i),r_all(:,:,i)); % Squared magnitudes of ray vectors. 1 x N_sensors
+                b = 2*sum(f.*r_all(:,:,i), 1); % 2 * dot product of f and r. 1 x N_sensors x N_robots
+                c = dot(f,f) - (this.robot_diameter/2)^2; % Squared distance from sensor to robot center minus squared radius
+                discriminant = b.^2 - 4*a.*c; % Discriminant of quadratic
+                % discriminant(:, :, i) = zeros(1, N_sensors); % Ignore self-intersection
+                t_circle = (-b - sqrt(discriminant))./(2*a); % Parameter values for intersection points
+                parameter_on_line_circle = (t_circle >= 0 & t_circle <= 1 & imag(t_circle) == 0); % Check if intersection points are on the ray
+                valid_parameter_circle = t_circle.*parameter_on_line_circle; % Set invalid intersections to Na
+                valid_parameter_circle(~parameter_on_line_circle) = this.distance_sensor_range; % Set invalid intersections to max range
+
+                valid_parameter_all = cat(3, valid_parameter, valid_parameter_circle); % Combine obstacle and robot intersection parameters
+                min_parameter = min(valid_parameter_all, [], 3); % Minimum t value for each
+
+                this.distances(1, :, i) = min_parameter.*(1 + this.distance_sensor_error*(2*rand(1, size(valid_parameter_all, 2)) - 1)); % Add noise to distance measurements
             end
 
             % Find the endpoints of each sensor ray
             this.distance_end_points = global_sensors(1:2, :, :) + this.distances.*r_all;
         end
-
-        % function update_distance_sensors(this)
-        %     % UPDATE_DISTANCE_SENSORS Updates the simulated measurements from
-        %     % the distance sensors of the robots
-        %     %
-        %     %   UPDATE_DISTANCE_SENSORS()
-        %     %
-        %     %   Example:
-        %     %       object.update_distance_sensors()
-        %     %
-        %     %   Notes:
-        %     %       Should be called within STEP after poses are updated
-        %     N = this.number_of_robots;
-        %     sensors = this.distance_sensors_orientation;
-
-        %     distances = reshape(this.distances, 1, []);
-        %     dist_size = size(distances);
-        %     distances = [distances; zeros(2,dist_size(2))];  
-
-        %     end_points = NaN(2, dist_size(2));
-
-            
-        %     for g = 1:N
-                
-        %         % takes current oriention of robot g to transform sensor vectors
-        %         % R = angle2dcm(0, 0, x(3,g))
-        %         R = [cos(this.poses(3,g)), -sin(this.poses(3,g)), 0;
-        %             sin(this.poses(3,g)),  cos(this.poses(3,g)), 0;
-        %                     0,           0,  1];
-                
-        %         % global x and y positions of distance sensors 1-7 for robot g
-        %         global_sensors = this.poses(:,g) + R * sensors;
-                
-        %         for h = 1:7
-        %             % takes global sensor orientation to find end point of ray
-        %             % sensor_angle = angle2dcm(0, 0, global_sensors(3,h))
-        %             sensor_angle = [cos(global_sensors(3,h)), -sin(global_sensors(3,h)), 0;
-        %                             sin(global_sensors(3,h)),  cos(global_sensors(3,h)), 0;
-        %                                                 0,           0,               1];
-                    
-        %             if distances(1, 7*(g-1)+h) ~= -1 
-        %                 % finds global sensor end point
-        %                 sensor_point = sensor_angle * distances(:, 7*(g-1)+h);
-                        
-        %                 % finds global sensor end point
-        %                 global_sensor_point = global_sensors(1:2,h) + sensor_point(1:2);
-                
-        %                 end_points(:,7*(g-1)+h) = global_sensor_point;
-        %             end
-
-        %         end
-
-        %     end
-
-        %     this.distance_end_points = end_points;
-        % end
         
         function initialize(this, initial_conditions)
             this.poses = initial_conditions;
@@ -272,7 +231,6 @@ classdef Robotarium < ARobotarium
 
             % Update distance sensors if enabled
             if this.distance_sensors_enabled
-                % this.update_distance_sensors();
                 this.simulate_distance_measurements();
             end
 
