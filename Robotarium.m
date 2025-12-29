@@ -215,11 +215,11 @@ classdef Robotarium < ARobotarium
             encoders = this.encoders + round(delta_encoder);
 
             % Handle overflow/underflow
-            overflow_indices = encoders > 32767;
-            underflow_indices = encoders < -32768;
-            encoders(overflow_indices) = encoders(overflow_indices) - 32767;
-            encoders(underflow_indices) = encoders(underflow_indices) + 32768;
-            
+            % overflow_indices = encoders > 32767;
+            % underflow_indices = encoders < -32768;
+            % encoders(overflow_indices) = encoders(overflow_indices) - 32767;
+            % encoders(underflow_indices) = encoders(underflow_indices) + 32768;
+
             this.encoders = encoders;
         end
         
