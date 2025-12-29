@@ -44,13 +44,15 @@ classdef Robotarium < ARobotarium
             parser.addParameter('FigureHandle', []);
             parser.addParameter('InitialConditions', []);
             parser.addParameter('UseDistanceSensors', false);
+            parser.addParameter('Obstacles', [NaN, NaN; NaN, NaN]); % Default no obstacles
                         
             parse(parser, varargin{:})
             
             % The input will be validated by ARobotarium
             this = this@ARobotarium(parser.Results.NumberOfRobots, ...
                 parser.Results.ShowFigure, parser.Results.FigureHandle, ...
-                parser.Results.UseDistanceSensors);
+                parser.Results.UseDistanceSensors, ...
+                parser.Results.Obstacles);
             
             initial_conditions = parser.Results.InitialConditions;
             
@@ -65,6 +67,17 @@ classdef Robotarium < ARobotarium
             
             % Call initialize during initialization
             this.initialize(initial_conditions);
+
+            % Draw obstacles if any
+            if ~isempty(this.obstacles) && this.show_figure
+                hold(this.figure_handle.Children, 'on');
+                line_objects = gobjects(1, size(this.obstacles, 3));
+                for i = 1:size(this.obstacles, 3)
+                    line_objects(i) = plot(this.figure_handle.Children, ...
+                        this.obstacles(1, :, i), this.obstacles(2, :, i), 'Color', [0.5, 0.5, 0.5], 'LineWidth', 2);
+                end
+                hold(this.figure_handle.Children, 'off');
+            end
         end
 
         function poses = get_poses(this)
@@ -150,15 +163,11 @@ classdef Robotarium < ARobotarium
 
             % Compute intersections of each sensor ray with each obstacle
             r_all = sensor_endpoints - global_sensors(1:2, :, :); % Vectors from sensor to endpoints
-            obstacles = [-1.6, -1.6; -1, 1]; % Start point and end point of each obstacle line segment
-            obstacles(:, :, end+1) = [-1.6, 1.6; 1, 1];
-            obstacles(:, :, end+1) = [1.6, 1.6; 1, -1];
-            obstacles(:, :, end+1) = [1.6, -1.6; -1, -1];
-            s_all = obstacles(:,2,:) - obstacles(:,1,:); % Vectors for obstacle line segments
+            s_all = this.obstacles(:,2,:) - this.obstacles(:,1,:); % Vectors for obstacle line segments
 
             for i = 1:this.number_of_robots
                 rxs = pagemtimes(r_all(1,:,i), s_all(2,:,:)) - pagemtimes(r_all(2,:,i), s_all(1,:,:)); % Cross products. 1 x N_sensors x num_obstacles
-                q = obstacles(:,1,:) - global_sensors(1:2, :, i); % Vectors from sensor to obstacle start points
+                q = this.obstacles(:,1,:) - global_sensors(1:2, :, i); % Vectors from sensor to obstacle start points
                 qxs = pagemtimes(q(1,:,:), s_all(2,:,:)) - pagemtimes(q(2,:,:), s_all(1,:,:)); % Cross products. 1 x N_sensors x num_obstacles
                 qxr = q(1,:,:).*r_all(2,:,i) - q(2,:,:).*r_all(1,:,i); % Cross products. 1 x N_sensors x num_obstacles
 
@@ -167,7 +176,7 @@ classdef Robotarium < ARobotarium
 
                 parameter_on_line = (t >= 0 & t <= 1) & (u >= 0 & u <= 1);
                 valid_parameter = t.*parameter_on_line;
-                valid_parameter(~parameter_on_line) = this.distance_sensor_range; % Set invalid intersections to NaN
+                valid_parameter(~parameter_on_line) = NaN; % Set invalid intersections to NaN
                 min_parameter = min(valid_parameter, [], 3); % Minimum t value for each sensor
 
                 % Check if any rays intersect other robots
@@ -176,11 +185,10 @@ classdef Robotarium < ARobotarium
                 b = 2*sum(f.*r_all(:,:,i), 1); % 2 * dot product of f and r. 1 x N_sensors x N_robots
                 c = dot(f,f) - (this.robot_diameter/2)^2; % Squared distance from sensor to robot center minus squared radius
                 discriminant = b.^2 - 4*a.*c; % Discriminant of quadratic
-                % discriminant(:, :, i) = zeros(1, N_sensors); % Ignore self-intersection
                 t_circle = (-b - sqrt(discriminant))./(2*a); % Parameter values for intersection points
                 parameter_on_line_circle = (t_circle >= 0 & t_circle <= 1 & imag(t_circle) == 0); % Check if intersection points are on the ray
-                valid_parameter_circle = t_circle.*parameter_on_line_circle; % Set invalid intersections to Na
-                valid_parameter_circle(~parameter_on_line_circle) = this.distance_sensor_range; % Set invalid intersections to max range
+                valid_parameter_circle = t_circle.*parameter_on_line_circle;
+                valid_parameter_circle(~parameter_on_line_circle) = NaN; % Set invalid intersections to NaN
 
                 valid_parameter_all = cat(3, valid_parameter, valid_parameter_circle); % Combine obstacle and robot intersection parameters
                 min_parameter = min(valid_parameter_all, [], 3); % Minimum t value for each
@@ -190,6 +198,29 @@ classdef Robotarium < ARobotarium
 
             % Find the endpoints of each sensor ray
             this.distance_end_points = global_sensors(1:2, :, :) + this.distances.*r_all;
+
+            % Convert NaN distances to -1 for consistency with real robot API
+            this.distances(isnan(this.distances)) = -1;
+        end
+
+        function simulate_encoder_readings(this)
+            % SIMULATE_ENCODER_READINGS Simulates the encoder readings
+            % based on the current robot velocities.
+            
+            % Convert linear and angular velocities to motor angular velocities
+            left_motor_angular_velocity = (2*this.velocities(1, :) - this.base_length*this.velocities(2, :))./(2*this.wheel_radius);
+            right_motor_angular_velocity = (2*this.velocities(1, :) + this.base_length*this.velocities(2, :))./(2*this.wheel_radius);
+
+            delta_encoder = this.encoder_counts_per_revolution*this.motor_gear_ratio/(2*pi)*[left_motor_angular_velocity; right_motor_angular_velocity]*this.time_step;
+            encoders = this.encoders + round(delta_encoder);
+
+            % Handle overflow/underflow
+            overflow_indices = encoders > 32767;
+            underflow_indices = encoders < -32768;
+            encoders(overflow_indices) = encoders(overflow_indices) - 32767;
+            encoders(underflow_indices) = encoders(underflow_indices) + 32768;
+            
+            this.encoders = encoders;
         end
         
         function initialize(this, initial_conditions)
@@ -233,6 +264,9 @@ classdef Robotarium < ARobotarium
             if this.distance_sensors_enabled
                 this.simulate_distance_measurements();
             end
+
+            % Update encoder readings
+            this.simulate_encoder_readings();
 
             %Allow getting of poses again
             this.checked_poses_already = false;

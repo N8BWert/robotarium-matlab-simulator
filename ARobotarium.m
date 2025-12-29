@@ -26,6 +26,8 @@ classdef ARobotarium < handle
         distance_sensors_orientation = [-0.04, 0.0,  0.04, 0.05, 0.04,   0.0   -0.04;
                                          0.04, 0.06, 0.05, 0.0,  -0.05, -0.06, -0.04;
                                          pi,   pi/2, pi/4, 0.0,  -pi/4, -pi/2, -pi];
+        encoder_counts_per_revolution = 28;
+        motor_gear_ratio = 100.37;
     end
     
     properties (GetAccess = public, SetAccess = protected)
@@ -38,6 +40,8 @@ classdef ARobotarium < handle
     
         number_of_robots
         figure_handle
+
+        obstacles
     end
     
     properties (GetAccess = protected, SetAccess = protected)
@@ -83,7 +87,7 @@ classdef ARobotarium < handle
     end
     
     methods
-        function this = ARobotarium(number_of_robots, show_figure, figure_handle, use_distance_sensors)
+        function this = ARobotarium(number_of_robots, show_figure, figure_handle, use_distance_sensors, obstacles)
             
             assert(number_of_robots >= 0 && number_of_robots <= 50, ...
             'Number of robots (%i) must be >= 0 and <= 50', number_of_robots);
@@ -92,9 +96,7 @@ classdef ARobotarium < handle
             
             this.velocities = zeros(2, N);
             this.poses = zeros(3, N);
-            % this.distances = zeros(7, N);
-            this.distances = 0.2*ones(7, N);
-            % this.distances = NaN(7, N);
+            this.distances = NaN(7, N);
             this.accelerations = zeros(3, N);
             this.orientations = zeros(3, N);
             this.magnetic_fields = zeros(3, N);
@@ -107,6 +109,8 @@ classdef ARobotarium < handle
             if this.distance_sensors_enabled
                 this.distance_end_points = NaN(2, 7*this.number_of_robots);
             end
+
+            this.obstacles = obstacles;
             
             if(show_figure)  
                 if(isempty(figure_handle))
