@@ -28,6 +28,7 @@ classdef ARobotarium < handle
                                          pi,   pi/2, pi/4, 0.0,  -pi/4, -pi/2, -pi];
         encoder_counts_per_revolution = 28;
         motor_gear_ratio = 100.37;
+        imu_orientation = [0.0594 - 0.00319; 0.0475 - 0.0344628; 0.0]; % x, y positions, and heading of IMU in robot frame (meters). Center is assumed to be the center of the axle.
     end
     
     properties (GetAccess = public, SetAccess = protected)
@@ -69,6 +70,9 @@ classdef ARobotarium < handle
 
         % Distance sensor end points
         distance_end_points
+
+        % Previous robot velocities for acceleration calculation
+        velocities_old
         
         % Figure handle for simulator
         show_figure
@@ -95,6 +99,7 @@ classdef ARobotarium < handle
             N = number_of_robots;            
             
             this.velocities = zeros(2, N);
+            this.velocities_old = zeros(2, N);
             this.poses = zeros(3, N);
             this.distances = NaN(7, N);
             this.accelerations = zeros(3, N);

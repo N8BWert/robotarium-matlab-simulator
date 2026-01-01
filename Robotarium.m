@@ -10,6 +10,9 @@ classdef Robotarium < ARobotarium
         
         iteration = 0; % How many times STEP has been called
         errors = {}; % Accumulated errors for the simulation
+
+        B % Function handle for magnetic field interpolation
+        starting_orientations % Initial relative orientations of robots when powered on
     end
 
     methods
@@ -78,6 +81,25 @@ classdef Robotarium < ARobotarium
                 end
                 hold(this.figure_handle.Children, 'off');
             end
+
+            % Initialize magnetic field grid
+            % load('recorded_magnetic_fields_world_frame_real.mat')
+            load('recorded_magnetic_fields_world_frame.mat')
+            % load('recorded_magnetic_fields_test.mat')
+            N_x_points = length(recorded_magnetic_fields.x_points);
+            N_y_points = length(recorded_magnetic_fields.y_points);
+            Bx = reshape(recorded_magnetic_fields.B(1,:), [N_y_points, N_x_points]);
+            By = reshape(recorded_magnetic_fields.B(2,:), [N_y_points, N_x_points]);
+            Bz = reshape(recorded_magnetic_fields.B(3,:), [N_y_points, N_x_points]);
+
+            Fx = griddedInterpolant({recorded_magnetic_fields.y_points, recorded_magnetic_fields.x_points}, Bx, 'linear', 'nearest');
+            Fy = griddedInterpolant({recorded_magnetic_fields.y_points, recorded_magnetic_fields.x_points}, By, 'linear', 'nearest');
+            Fz = griddedInterpolant({recorded_magnetic_fields.y_points, recorded_magnetic_fields.x_points}, Bz, 'linear', 'nearest');
+
+            this.B = @(x) [Fx(x(2,:), x(1,:)); Fy(x(2,:), x(1,:)); Fz(x(2,:), x(1,:))];
+
+            % Initialize starting orientations randomly
+            this.starting_orientations = (2*randi([0, 1], 1, this.number_of_robots) - 1)*pi/2;
         end
 
         function poses = get_poses(this)
@@ -100,44 +122,6 @@ classdef Robotarium < ARobotarium
             this.checked_poses_already = true;
             this.called_step_already = false;
         end
-
-        % function intersection_point = line_intersection_brute_force(this, A, B, C, D)
-        %     % LINE_INTERSECTION Computes the intersection of a line with
-        %     % the environment boundaries
-        %     %
-        %     %   LINE_INTERSECTION()
-        %     %   Input: A, B - 2D endpoints of line segment 1
-        %     %          C, D - 2D endpoints of line segment 2
-        %     %
-        %     %   Example:
-        %     %       object.line_intersection()
-        %     %
-        %     %   Notes:
-        %     %       Used in distance sensor simulation
-        %     intersection_point = [NaN; NaN];
-
-        %     r = B - A;
-        %     s = D - C;
-        %     q = C - A;
-
-        %     rxs = r(1)*s(2) - r(2)*s(1);
-        %     qxs = q(1)*s(2) - q(2)*s(1);
-        %     qxr = q(1)*r(2) - q(2)*r(1);
-
-        %     if rxs == 0
-        %         % Lines are parallel
-        %         return;
-        %     end
-
-        %     t = qxs / rxs; % Parameter for the intersection on line AB
-        %     u = qxr / rxs; % Parameter for the intersection on line CD
-
-        %     if (t >= 0 && t <= 1) && (u >= 0 && u <= 1)
-        %         % There is an intersection within the line segments
-        %         intersection_point = A + t * r;
-        %     end
-            
-        % end
 
         function simulate_distance_measurements(this)
             % UPDATE_DISTANCE_MEASUREMENTS Simulates the distance sensor
@@ -176,7 +160,7 @@ classdef Robotarium < ARobotarium
 
                 parameter_on_line = (t >= 0 & t <= 1) & (u >= 0 & u <= 1);
                 valid_parameter = t.*parameter_on_line;
-                valid_parameter(~parameter_on_line) = NaN; % Set invalid intersections to NaN
+                valid_parameter(~parameter_on_line) = this.distance_sensor_range; % Set invalid intersections to NaN
                 min_parameter = min(valid_parameter, [], 3); % Minimum t value for each sensor
 
                 % Check if any rays intersect other robots
@@ -188,7 +172,7 @@ classdef Robotarium < ARobotarium
                 t_circle = (-b - sqrt(discriminant))./(2*a); % Parameter values for intersection points
                 parameter_on_line_circle = (t_circle >= 0 & t_circle <= 1 & imag(t_circle) == 0); % Check if intersection points are on the ray
                 valid_parameter_circle = t_circle.*parameter_on_line_circle;
-                valid_parameter_circle(~parameter_on_line_circle) = NaN; % Set invalid intersections to NaN
+                valid_parameter_circle(~parameter_on_line_circle) = this.distance_sensor_range; % Set invalid intersections to NaN
 
                 valid_parameter_all = cat(3, valid_parameter, valid_parameter_circle); % Combine obstacle and robot intersection parameters
                 min_parameter = min(valid_parameter_all, [], 3); % Minimum t value for each
@@ -201,6 +185,7 @@ classdef Robotarium < ARobotarium
 
             % Convert NaN distances to -1 for consistency with real robot API
             this.distances(isnan(this.distances)) = -1;
+            this.distances = reshape(this.distances, [7, this.number_of_robots]);
         end
 
         function simulate_encoder_readings(this)
@@ -221,6 +206,61 @@ classdef Robotarium < ARobotarium
             % encoders(underflow_indices) = encoders(underflow_indices) + 32768;
 
             this.encoders = encoders;
+        end
+
+        function simulate_imu_measurements(this)
+            % SIMULATE_IMU_MEASUREMENTS Simulates the IMU measurements
+            % based on the current robot velocities.
+            %
+            %   SIMULATE_IMU_MEASUREMENTS()
+            %
+            %   Example:
+            %       object.simulate_imu_measurements()
+            %
+            %   Notes:
+            %       The IMU axis may need to be adjusted. It seems weird and inconsistent with the datasheet. It is now empirical.
+            %       X-axis: Right
+            %       Y-axis: Forward
+            %       Z-axis: Down
+            %       The accelerometer simulation is now noise-free for easier debugging.
+
+            % Compute accelerations
+            linear_accelerations = (this.velocities(1,:) - this.velocities_old(1,:))/this.time_step; % 1 x N_robots
+            angular_accelerations = (this.velocities(2,:) - this.velocities_old(2,:))/this.time_step; % 1 x N_robots
+
+            linear_accelerations_3d = [linear_accelerations; zeros(1, this.number_of_robots); 9.81*ones(1, this.number_of_robots)]; % 3 x N_robots
+            angular_accelerations_3d = [zeros(1, this.number_of_robots); zeros(1, this.number_of_robots); angular_accelerations]; % 3 x N_robots
+            angular_velocities_3d = [zeros(1, this.number_of_robots); zeros(1, this.number_of_robots); this.velocities(2,:)]; % 3 x N_robots
+
+            axle_to_imu_vector = [this.imu_orientation(1)*ones(1, this.number_of_robots); ...
+                                  this.imu_orientation(2)*ones(1, this.number_of_robots); ...
+                                  zeros(1, this.number_of_robots)]; % Vector from axle center to IMU in robot frame. 3 x N_robots
+
+            imu_accelerations = linear_accelerations_3d + ...
+                                [angular_accelerations_3d(2,:).*axle_to_imu_vector(3,:) - angular_accelerations_3d(3,:).*axle_to_imu_vector(2,:); ...
+                                 angular_accelerations_3d(3,:).*axle_to_imu_vector(1,:) - angular_accelerations_3d(1,:).*axle_to_imu_vector(3,:); ...
+                                 angular_accelerations_3d(1,:).*axle_to_imu_vector(2,:) - angular_accelerations_3d(2,:).*axle_to_imu_vector(1,:)] + ... % 3 x N_robots. Acceleration due to angular acceleration
+                                 angular_velocities_3d.*sum(angular_velocities_3d.*axle_to_imu_vector, 1) - ... % 3 x N_robots. Centrifugal acceleration
+                                 sum(angular_velocities_3d.^2, 1).*axle_to_imu_vector; % 3 x N_robots. Centripetal acceleration
+
+            % Convert accelerations from robot frame to sensor frame
+            imu_accelerations_sensor_frame = [-imu_accelerations(2,:); imu_accelerations(1,:); imu_accelerations(3,:)]; % 3 x N_robots
+
+            % Add noise to accelerometer readings
+            this.accelerations = imu_accelerations_sensor_frame; % + this.imu_acceleration_noise*randn(size(imu_accelerations));
+
+            % Compute magnetic field readings
+            % this.magnetic_fields = this.B(this.poses(1:2, :));
+            magnetic_fields_world_frame_parallel = reshape(this.B(this.poses(1:2, :)), 3, 1, this.number_of_robots); % 3 x 1 x N_robots
+            R_rw = pagetranspose(rotation_matrix(this.poses(3,:))); % From world frame to robot frame
+            magnetic_fields_robot_frame_parallel = pagemtimes(R_rw, magnetic_fields_world_frame_parallel);
+            this.magnetic_fields = reshape(magnetic_fields_robot_frame_parallel, 3, this.number_of_robots);
+
+            % Simulate orientation readings
+            this.orientations = (this.poses(3, :) + this.starting_orientations)*(180/pi); % Degrees. Robots are powered on at either 90 or 180 degrees.
+
+            % Update old velocities
+            this.velocities_old = this.velocities;
         end
         
         function initialize(this, initial_conditions)
@@ -267,6 +307,9 @@ classdef Robotarium < ARobotarium
 
             % Update encoder readings
             this.simulate_encoder_readings();
+
+            % Update IMU measurements
+            this.simulate_imu_measurements();
 
             %Allow getting of poses again
             this.checked_poses_already = false;
