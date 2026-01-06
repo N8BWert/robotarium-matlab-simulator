@@ -158,7 +158,7 @@ classdef Robotarium < ARobotarium
 
                 parameter_on_line = (t >= 0 & t <= 1) & (u >= 0 & u <= 1);
                 valid_parameter = t.*parameter_on_line;
-                valid_parameter(~parameter_on_line) = this.distance_sensor_range; % Set invalid intersections to NaN
+                valid_parameter(~parameter_on_line) = NaN; % Set invalid intersections to NaN
                 min_parameter = min(valid_parameter, [], 3); % Minimum t value for each sensor
 
                 % Check if any rays intersect other robots
@@ -170,7 +170,7 @@ classdef Robotarium < ARobotarium
                 t_circle = (-b - sqrt(discriminant))./(2*a); % Parameter values for intersection points
                 parameter_on_line_circle = (t_circle >= 0 & t_circle <= 1 & imag(t_circle) == 0); % Check if intersection points are on the ray
                 valid_parameter_circle = t_circle.*parameter_on_line_circle;
-                valid_parameter_circle(~parameter_on_line_circle) = this.distance_sensor_range; % Set invalid intersections to NaN
+                valid_parameter_circle(~parameter_on_line_circle) = NaN; % Set invalid intersections to NaN
 
                 valid_parameter_all = cat(3, valid_parameter, valid_parameter_circle); % Combine obstacle and robot intersection parameters
                 min_parameter = min(valid_parameter_all, [], 3); % Minimum t value for each
