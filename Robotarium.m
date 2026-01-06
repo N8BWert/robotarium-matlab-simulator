@@ -83,9 +83,7 @@ classdef Robotarium < ARobotarium
             end
 
             % Initialize magnetic field grid
-            % load('recorded_magnetic_fields_world_frame_real.mat')
             load('recorded_magnetic_fields_world_frame.mat')
-            % load('recorded_magnetic_fields_test.mat')
             N_x_points = length(recorded_magnetic_fields.x_points);
             N_y_points = length(recorded_magnetic_fields.y_points);
             Bx = reshape(recorded_magnetic_fields.B(1,:), [N_y_points, N_x_points]);
@@ -199,30 +197,31 @@ classdef Robotarium < ARobotarium
             delta_encoder = this.encoder_counts_per_revolution*this.motor_gear_ratio/(2*pi)*[left_motor_angular_velocity; right_motor_angular_velocity]*this.time_step;
             encoders = this.encoders + round(delta_encoder);
 
-            % Handle overflow/underflow
-            % overflow_indices = encoders > 32767;
-            % underflow_indices = encoders < -32768;
-            % encoders(overflow_indices) = encoders(overflow_indices) - 32767;
-            % encoders(underflow_indices) = encoders(underflow_indices) + 32768;
-
             this.encoders = encoders;
         end
 
         function simulate_imu_measurements(this)
             % SIMULATE_IMU_MEASUREMENTS Simulates the IMU measurements
-            % based on the current robot velocities.
-            %
-            %   SIMULATE_IMU_MEASUREMENTS()
-            %
-            %   Example:
-            %       object.simulate_imu_measurements()
+            % based on the current robot poses and velocities.
             %
             %   Notes:
-            %       The IMU axis may need to be adjusted. It seems weird and inconsistent with the datasheet. It is now empirical.
-            %       X-axis: Right
-            %       Y-axis: Forward
-            %       Z-axis: Down
-            %       The accelerometer simulation is now noise-free for easier debugging.
+            %   The IMU axis may need to be adjusted. It seems weird and inconsistent with the datasheet. It is now empirical yet certain.
+            %   Accelerometer axes (in robot frame):
+            %      X-axis: Left
+            %      Y-axis: Backward
+            %      Z-axis: Down
+            %
+            %   Magnetometer axes (in robot frame):
+            %      X-axis: Right
+            %      Y-axis: Forward
+            %      Z-axis: Up
+            %
+            %   Fused Orientation axes (in robot frame):
+            %      Roll: Yaw
+            %      Pitch: Roll
+            %      Yaw: Pitch
+            %
+            % The IMU simulation is now noise-free for easier debugging.
 
             % Compute accelerations
             linear_accelerations = (this.velocities(1,:) - this.velocities_old(1,:))/this.time_step; % 1 x N_robots
@@ -244,20 +243,22 @@ classdef Robotarium < ARobotarium
                                  sum(angular_velocities_3d.^2, 1).*axle_to_imu_vector; % 3 x N_robots. Centripetal acceleration
 
             % Convert accelerations from robot frame to sensor frame
-            imu_accelerations_sensor_frame = [-imu_accelerations(2,:); imu_accelerations(1,:); imu_accelerations(3,:)]; % 3 x N_robots
+            imu_accelerations_sensor_frame = [imu_accelerations(2,:); imu_accelerations(1,:); imu_accelerations(3,:)]; % 3 x N_robots
 
             % Add noise to accelerometer readings
             this.accelerations = imu_accelerations_sensor_frame; % + this.imu_acceleration_noise*randn(size(imu_accelerations));
 
             % Compute magnetic field readings
-            % this.magnetic_fields = this.B(this.poses(1:2, :));
             magnetic_fields_world_frame_parallel = reshape(this.B(this.poses(1:2, :)), 3, 1, this.number_of_robots); % 3 x 1 x N_robots
             R_rw = pagetranspose(rotation_matrix(this.poses(3,:))); % From world frame to robot frame
             magnetic_fields_robot_frame_parallel = pagemtimes(R_rw, magnetic_fields_world_frame_parallel);
             this.magnetic_fields = reshape(magnetic_fields_robot_frame_parallel, 3, this.number_of_robots);
 
             % Simulate orientation readings
-            this.orientations = (this.poses(3, :) + this.starting_orientations)*(180/pi); % Degrees. Robots are powered on at either 90 or 180 degrees.
+            orientation_yaw = mod((this.poses(3, :)*(180/pi) + 360 + this.starting_orientations*(180/pi) + 360), 360); % Degrees in [0, 360)
+            orientation_roll = zeros(1, this.number_of_robots); % No roll
+            orientation_pitch = zeros(1, this.number_of_robots); % No pitch
+            this.orientations = [orientation_yaw; orientation_roll; orientation_pitch]; % Degrees. Robots are powered on at either 90 or 180 degrees.
 
             % Update old velocities
             this.velocities_old = this.velocities;

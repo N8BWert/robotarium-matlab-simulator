@@ -28,7 +28,7 @@ classdef ARobotarium < handle
                                          pi,   pi/2, pi/4, 0.0,  -pi/4, -pi/2, -pi];
         encoder_counts_per_revolution = 28;
         motor_gear_ratio = 100.37;
-        imu_orientation = [0.0594 - 0.00319; 0.0475 - 0.0344628; 0.0]; % x, y positions, and heading of IMU in robot frame (meters). Center is assumed to be the center of the axle.
+        imu_orientation = [0.0594 - 0.00319; 0.0344628 - 0.0475; 0.0]; % x, y positions, and heading of IMU in robot frame (meters). Center is assumed to be the center of the axle.
     end
     
     properties (GetAccess = public, SetAccess = protected)
@@ -148,7 +148,7 @@ classdef ARobotarium < handle
             N = size(rgbs, 2);
 
             assert(N <= this.number_of_robots, "Row size of rgb values (%i) must be <= to number of agents (%i)", ...
-                N, this.number_of_robotls);
+                N, this.number_of_robots);
 
             assert(all(all(rgbs(1:3, :) <= 255)) && all(all(rgbs(1:3, :) >= 0)), "RGB commands must be between 0 and 255");
 
@@ -182,7 +182,7 @@ classdef ARobotarium < handle
         function encoders = get_encoders(this)
             % Get the encoder values for each of the robots
 
-            encoders = this.encoders - this.initial_encoders;
+            encoders = int32(this.encoders) - int32(this.initial_encoders);
         end
         
         function iters = time2iters(this, time)
