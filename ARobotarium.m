@@ -8,6 +8,8 @@ classdef ARobotarium < handle
         robot_body  % Base robot body position used for rendering
         
         boundary_patch % Path to denote the Robotarium's boundary
+
+        distance_ray_patch % Handle for the distance sensor rays rendering
     end
     
     properties (Constant)
@@ -18,7 +20,15 @@ classdef ARobotarium < handle
         base_length = 0.105;
         collision_diameter = 0.135;
         collision_offset = 0.025;       
-        boundaries = [-1.6, 1.6, -1, 1];      
+        boundaries = [-1.6, 1.6, -1, 1];
+        distance_sensor_error = 0.03; % 3% error. Based on the VL53L4CD datasheet
+        distance_sensor_range = 1.2; % meters 
+        distance_sensors_orientation = [-0.04, 0.0,  0.04, 0.05, 0.04,   0.0   -0.04;
+                                         0.04, 0.06, 0.05, 0.0,  -0.05, -0.06, -0.04;
+                                         pi,   pi/2, pi/4, 0.0,  -pi/4, -pi/2, -pi];
+        encoder_counts_per_revolution = 28;
+        motor_gear_ratio = 100.37;
+        imu_orientation = [0.0594 - 0.00319; 0.0344628 - 0.0475; 0.0]; % x, y positions, and heading of IMU in robot frame (meters). Center is assumed to be the center of the axle.
     end
     
     properties (GetAccess = public, SetAccess = protected)
@@ -31,6 +41,8 @@ classdef ARobotarium < handle
     
         number_of_robots
         figure_handle
+
+        obstacles
     end
     
     properties (GetAccess = protected, SetAccess = protected)
@@ -55,6 +67,12 @@ classdef ARobotarium < handle
 
         % The led connected to the robot
         leds
+
+        % Distance sensor end points
+        distance_end_points
+
+        % Previous robot velocities for acceleration calculation
+        velocities_old
         
         % Figure handle for simulator
         show_figure
@@ -73,7 +91,7 @@ classdef ARobotarium < handle
     end
     
     methods
-        function this = ARobotarium(number_of_robots, show_figure, figure_handle)
+        function this = ARobotarium(number_of_robots, show_figure, figure_handle, use_distance_sensors, obstacles)
             
             assert(number_of_robots >= 0 && number_of_robots <= 50, ...
             'Number of robots (%i) must be >= 0 and <= 50', number_of_robots);
@@ -81,8 +99,9 @@ classdef ARobotarium < handle
             N = number_of_robots;            
             
             this.velocities = zeros(2, N);
+            this.velocities_old = zeros(2, N);
             this.poses = zeros(3, N);
-            this.distances = zeros(7, N);
+            this.distances = NaN(7, N);
             this.accelerations = zeros(3, N);
             this.orientations = zeros(3, N);
             this.magnetic_fields = zeros(3, N);
@@ -90,6 +109,13 @@ classdef ARobotarium < handle
             this.encoders = zeros(2, N);
             this.show_figure = show_figure;
             this.leds = zeros(3, N);
+
+            this.distance_sensors_enabled = use_distance_sensors;
+            if this.distance_sensors_enabled
+                this.distance_end_points = NaN(2, 7*this.number_of_robots);
+            end
+
+            this.obstacles = obstacles;
             
             if(show_figure)  
                 if(isempty(figure_handle))
@@ -122,7 +148,7 @@ classdef ARobotarium < handle
             N = size(rgbs, 2);
 
             assert(N <= this.number_of_robots, "Row size of rgb values (%i) must be <= to number of agents (%i)", ...
-                N, this.number_of_robotls);
+                N, this.number_of_robots);
 
             assert(all(all(rgbs(1:3, :) <= 255)) && all(all(rgbs(1:3, :) >= 0)), "RGB commands must be between 0 and 255");
 
@@ -156,7 +182,7 @@ classdef ARobotarium < handle
         function encoders = get_encoders(this)
             % Get the encoder values for each of the robots
 
-            encoders = this.encoders - this.initial_encoders;
+            encoders = int32(this.encoders) - int32(this.initial_encoders);
         end
         
         function iters = time2iters(this, time)
@@ -289,6 +315,11 @@ classdef ARobotarium < handle
                     'FaceVertexCData', data.colors, ...
                     'EdgeColor','none');
             end
+
+            % Distance sensor ray end points
+            if this.distance_sensors_enabled
+                this.distance_ray_patch = scatter(zeros(1, 7*this.number_of_robots), zeros(1, 7*this.number_of_robots), 150,'red', 'filled');
+            end
         end
         
         function draw_robots(this)
@@ -307,6 +338,12 @@ classdef ARobotarium < handle
                 % Set LEDs
                 led_values = this.leds / 255;
                 this.robot_handle{i}.FaceVertexCData(4, :) = led_values(:, i);
+
+                % Draw distance sensor rays
+                if this.distance_sensors_enabled
+                    this.distance_ray_patch.XData = this.distance_end_points(1, :);
+                    this.distance_ray_patch.YData = this.distance_end_points(2, :);
+                end
             end
 
             drawnow limitrate
